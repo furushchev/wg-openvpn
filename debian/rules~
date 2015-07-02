@@ -66,13 +66,13 @@ install: build
 	install -m 755 debian/openvpn.if-up.d $(CURDIR)/debian/wg-openvpn/etc/network/if-up.d/openvpn
 	install -m 755 debian/openvpn.if-down.d $(CURDIR)/debian/wg-openvpn/etc/network/if-down.d/openvpn
 	#install plugins
-	install -m 644 plugin/auth-pam/openvpn-auth-pam.so $(CURDIR)/debian/openvpn/usr/lib/openvpn
-	install -m 644 plugin/down-root/openvpn-down-root.so $(CURDIR)/debian/openvpn/usr/lib/openvpn
-	install -m 644 plugin/auth-pam/README $(CURDIR)/debian/openvpn/usr/share/doc/openvpn/README.auth-pam
-	install -m 644 plugin/down-root/README $(CURDIR)/debian/openvpn/usr/share/doc/openvpn/README.down-root
-	intall plugin headers 
-	install -m 644 openvpn-plugin.h $(CURDIR)/debian/openvpn/usr/include/openvpn/openvpn-plugin.h
-	resolvconf script
+	#install -m 644 plugin/auth-pam/openvpn-auth-pam.so $(CURDIR)/debian/openvpn/usr/lib/openvpn
+	#install -m 644 plugin/down-root/openvpn-down-root.so $(CURDIR)/debian/openvpn/usr/lib/openvpn
+	#install -m 644 plugin/auth-pam/README $(CURDIR)/debian/openvpn/usr/share/doc/openvpn/README.auth-pam
+	#install -m 644 plugin/down-root/README $(CURDIR)/debian/openvpn/usr/share/doc/openvpn/README.down-root
+	# intall plugin headers 
+	#install -m 644 openvpn-plugin.h $(CURDIR)/debian/openvpn/usr/include/openvpn/openvpn-plugin.h
+	# resolvconf script
 	install -m 755 debian/update-resolv-conf $(CURDIR)/debian/wg-openvpn/etc/wg-openvpn/update-resolv-conf
 	# bash completion
 	install -m 644 debian/openvpn.bash_completion $(CURDIR)/debian/wg-openvpn/etc/bash_completion.d/openvpn
