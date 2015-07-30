@@ -1,0 +1,24 @@
+#!/bin/bash
+
+
+rm -rf build
+mkdir build
+cd build
+
+. /etc/lsb-release
+
+SRCDIR=openvpn-2.3.2
+apt-get source openvpn=2.3.2
+
+#tar xf openvpn_2.2.1-8ubuntu1
+#(cd $SRCDIR; zcat ../openvpn_2.2.1-8ubuntu1.debian.tar.gz | patch -p1)
+
+#cp -r ../changes/* $SRCDIR
+cd $SRCDIR
+chmod a+x debian/rules
+dpkg-buildpackage -rfakeroot -uc -b
+cd ../..
+
+mv build/*.deb ..
+mv build/*.changes ..
+#rm -rf build
