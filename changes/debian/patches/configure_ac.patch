@@ -1,0 +1,20 @@
+--- configure.ac.real	2015-09-10 14:45:09.303444902 -0400
++++ configure.ac	2015-09-10 14:43:21.675446799 -0400
+@@ -26,13 +26,15 @@
+ AC_PREREQ(2.50)
+ 
+ m4_include(version.m4)
+-AC_INIT([OpenVPN], [PRODUCT_VERSION], [openvpn-users@lists.sourceforge.net], [openvpn])
++#AC_INIT([OpenVPN], [PRODUCT_VERSION], [openvpn-users@lists.sourceforge.net], [openvpn])
++AC_INIT(openvpn, [$PACKAGE_VERSION])
+ AM_CONFIG_HEADER(config.h)
+ AC_CONFIG_SRCDIR(syshead.h)
+ 
+ dnl Guess host type.
+ AC_CANONICAL_HOST
+-AM_INIT_AUTOMAKE(openvpn, [$PACKAGE_VERSION])
++AM_INIT_AUTOMAKE
++#AM_INIT_AUTOMAKE(openvpn, [$PACKAGE_VERSION])
+ 
+ AC_ARG_WITH(cygwin-native,
+ 	[  --with-cygwin-native              Compile native win32],
