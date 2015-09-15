@@ -17,12 +17,23 @@ wget http://archive.ubuntu.com/ubuntu/pool/main/o/openvpn/openvpn_2.2.1-8ubuntu1
 
 #get required code out of the box
 tar xf openvpn_2.2.1.orig.tar.gz
-tar xf openvpn_2.2.1-8ubuntu1.debian.tar.gz | patch -p1
-# press No on all the patch questions
 
-# copy patches from debian/patches/ to the openvpn/debian/patches/ folder
-cp -r ../changes/* $SRCDIR/
-cp -r debian/patches/* $SRCDIR/debian/patches/
+# openvpn requires to be patched	 so it can build past automake version 1.11.1
+cp -rf ../changes/* .
+cp debian/patches/configure_ac.patch .
+patch -i configure_ac.patch -p0
+
+cp -rf debian $SRCDIR
+tar xf openvpn_2.2.1-8ubuntu1.debian.tar.gz
+# Copy all patches but exclude jjo
+rsync --exclude=jjo-ipv6-support.patch debian/patches/* $SRCDIR/debian/patches/
+sed -i '/jjo-ipv6-support.patch/d' $SRCDIR/debian/patches/series
+# Copy rest of deb stuff
+rsync debian/openvpn* debian/update-resolv-conf debian/source debian/dirs debian/examples debian/default $SRCDIR/debian/
+sed -i 's/openvpn/wg-openvpn/g' $SRCDIR/debian/dirs
+
+#rsync --exclude debian/control --exclude debian/rules --exclude debian/patches --exclude debian/changelog debian/* $SRCDIR/debian/
+
 #(cd $SRCDIR; zcat ../openvpn_2.2.1-8ubuntu1.debian.tar.gz | patch -p1)
 #cp -r ../debian/patches/* ./debian/patches/
 # copy the changes/debian to openvpn
@@ -30,10 +41,10 @@ cp -r debian/patches/* $SRCDIR/debian/patches/
 
 # build
 cd $SRCDIR
+aclocal
 automake --add-missing
 chmod a+x debian/rules
 dpkg-buildpackage -rfakeroot -uc -b
-
 
 #cp -r ../changes/* $SRCDIR
 #cd $SRCDIR
@@ -41,7 +52,7 @@ dpkg-buildpackage -rfakeroot -uc -b
 #dpkg-buildpackage -rfakeroot -uc -b
 #cd ../..
 
-mv build/*.deb ..
-mv build/*.changes ..
-rm -rf build
+#mv build/*.deb ..
+#mv build/*.changes ..
+#rm -rf build
 
