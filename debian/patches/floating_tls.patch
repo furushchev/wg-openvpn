@@ -1,0 +1,335 @@
+A patch that allows floating in multi-tls sessions.Index: openvpn-2.3.2/configure.ac
+===================================================================
+Index: openvpn-2.3.2/configure.ac
+===================================================================
+--- openvpn-2.3.2.orig/configure.ac	2013-05-31 21:00:25.000000000 +0900
++++ openvpn-2.3.2/configure.ac	2016-04-14 13:14:43.204184876 +0900
+@@ -138,6 +138,13 @@
+ )
+ 
+ AC_ARG_ENABLE(
++	[floating-tls],
++	[AS_HELP_STRING([--disable-floating-tls], [disable floating tls support (--floating-tls) @<:@default=yes@:>@])],
++	,
++	[enable_floating_tls="yes"]
++)
++
++AC_ARG_ENABLE(
+ 	[multihome],
+ 	[AS_HELP_STRING([--disable-multihome], [disable multi-homed UDP server support (--multihome) @<:@default=yes@:>@])],
+ 	,
+@@ -927,6 +934,7 @@
+ test "${enable_socks}" = "yes" && AC_DEFINE([ENABLE_SOCKS], [1], [Enable Socks proxy support])
+ test "${enable_http_proxy}" = "yes" && AC_DEFINE([ENABLE_HTTP_PROXY], [1], [Enable HTTP proxy support])
+ test "${enable_multihome}" = "yes" && AC_DEFINE([ENABLE_MULTIHOME], [1], [Enable multi-homed UDP server capability])
++test "${enable_floating_tls}" = "yes" && AC_DEFINE([ENABLE_FLOATING_TLS], [1], [Enable floating-tls UDP server capability])
+ test "${enable_debug}" = "yes" && AC_DEFINE([ENABLE_DEBUG], [1], [Enable debugging support])
+ test "${enable_small}" = "yes" && AC_DEFINE([ENABLE_SMALL], [1], [Enable smaller executable size])
+ test "${enable_fragment}" = "yes" && AC_DEFINE([ENABLE_FRAGMENT], [1], [Enable internal fragmentation support])
+Index: openvpn-2.3.2/doc/openvpn.8
+===================================================================
+--- openvpn-2.3.2.orig/doc/openvpn.8	2016-04-14 13:13:53.000000000 +0900
++++ openvpn-2.3.2/doc/openvpn.8	2016-04-14 13:15:50.524182918 +0900
+@@ -606,6 +606,10 @@
+ option.
+ .\"*********************************************************
+ .TP
++.B \-\-floating-tls
++Allows tls connections to float.
++.\"*********************************************************
++.TP
+ .B \-\-ipchange cmd
+ Run command
+ .B cmd
+Index: openvpn-2.3.2/src/openvpn/forward.c
+===================================================================
+--- openvpn-2.3.2.orig/src/openvpn/forward.c	2013-05-31 21:00:25.000000000 +0900
++++ openvpn-2.3.2/src/openvpn/forward.c	2016-04-14 13:16:23.188181968 +0900
+@@ -47,6 +47,10 @@
+ #include "ping-inline.h"
+ #include "mstats.h"
+ 
++#ifdef ENABLE_FLOATING_TLS
++#include "ssl.h"
++#endif
++
+ counter_type link_read_bytes_global;  /* GLOBAL */
+ counter_type link_write_bytes_global; /* GLOBAL */
+ 
+@@ -870,7 +874,11 @@
+        *
+        * Also, update the persisted version of our packet-id.
+        */
+-      if (!TLS_MODE (c))
++      if (!TLS_MODE (c)
++#ifdef ENABLE_FLOATING_TLS
++          || c->options.floating_tls
++#endif
++         )
+ 	link_socket_set_outgoing_addr (&c->c2.buf, lsi, &c->c2.from, NULL, c->c2.es);
+ 
+       /* reset packet received timer */
+@@ -1138,6 +1146,22 @@
+ 	    /* If Socks5 over UDP, prepend header */
+ 	    socks_preprocess_outgoing_link (c, &to_addr, &size_delta);
+ #endif
++
++#ifdef ENABLE_FLOATING_TLS
++      if (c->c2.link_socket->info.proto == PROTO_UDPv4 &&
++          c->options.floating_tls &&
++          c->options.tls_client)
++      {
++              if (c->floating_tls_prefix == 0)
++                      RAND_bytes((uint8_t *) &c->floating_tls_prefix, sizeof(c->floating_tls_prefix));
++
++              struct buffer *buf = &c->c2.to_link;
++              uint8_t opcode = FLOATING_TLS_OPCODE | sizeof(c->floating_tls_prefix);
++              ASSERT (buf_write_prepend (buf, &c->floating_tls_prefix, sizeof (c->floating_tls_prefix)));
++              ASSERT (buf_write_prepend (buf, &opcode, sizeof (opcode)));
++      }
++#endif
++
+ 	    /* Send packet */
+ 	    size = link_socket_write (c->c2.link_socket,
+ 				      &c->c2.to_link,
+Index: openvpn-2.3.2/src/openvpn/init.c
+===================================================================
+--- openvpn-2.3.2.orig/src/openvpn/init.c	2013-05-31 21:00:25.000000000 +0900
++++ openvpn-2.3.2/src/openvpn/init.c	2016-04-14 13:16:41.900181424 +0900
+@@ -2209,6 +2209,10 @@
+   to.disable_occ = !options->occ;
+ #endif
+ 
++#ifdef ENABLE_FLOATING_TLS
++  to.floating_tls = options->floating_tls;
++#endif
++
+   to.verify_command = options->tls_verify;
+   to.verify_export_cert = options->tls_export_cert;
+   to.verify_x509_type = (options->verify_x509_type & 0xff);
+@@ -2829,6 +2833,9 @@
+     {
+       link_socket_close (c->c2.link_socket);
+       c->c2.link_socket = NULL;
++#ifdef ENABLE_FLOATING_TLS
++      c->floating_tls_prefix = 0;
++#endif
+     }
+ 
+   if (!(c->sig->signal_received == SIGUSR1 && c->options.persist_remote_ip))
+Index: openvpn-2.3.2/src/openvpn/mudp.c
+===================================================================
+--- openvpn-2.3.2.orig/src/openvpn/mudp.c	2013-05-31 21:00:07.000000000 +0900
++++ openvpn-2.3.2/src/openvpn/mudp.c	2016-04-14 13:17:00.772180876 +0900
+@@ -37,6 +37,10 @@
+ 
+ #include "memdbg.h"
+ 
++#ifdef ENABLE_FLOATING_TLS
++#include "ssl.h"
++#endif
++
+ /*
+  * Get a client instance based on real address.  If
+  * the instance doesn't exist, create it while
+@@ -51,7 +55,34 @@
+   struct multi_instance *mi = NULL;
+   struct hash *hash = m->hash;
+ 
+-  if (mroute_extract_openvpn_sockaddr (&real, &m->top.c2.from.dest, true))
++  bool ret = false;
++#ifdef ENABLE_FLOATING_TLS
++    // Check if this is a floating-tls packet
++    if (m->top.c2.buf.len > 0)
++    {
++            uint8_t c = *BPTR (&m->top.c2.buf);
++            if ((c & FLOATING_TLS_OPCODE_MASK) == FLOATING_TLS_OPCODE)
++            {
++                    int len = c & FLOATING_TLS_LENGTH_MASK;
++                    uint8_t *id = BPTR (&m->top.c2.buf) + 1;
++
++                    if (buf_advance(&m->top.c2.buf, len + 1))
++                    {
++                            int i;
++                            real.type = MR_ADDR_IPV4 | MR_WITH_PORT;
++                            real.netbits = 0;
++                            real.len = len;
++                            memcpy (real.addr, id, real.len);
++                            ret = true;
++                    }
++            }
++    }
++#endif
++
++    // Not a floating-tls packet
++    if (!ret)
++            ret = mroute_extract_openvpn_sockaddr (&real, &m->top.c2.from.dest, true);
++    if (ret)
+     {
+       struct hash_element *he;
+       const uint32_t hv = hash_value (hash, &real);
+Index: openvpn-2.3.2/src/openvpn/openvpn.h
+===================================================================
+--- openvpn-2.3.2.orig/src/openvpn/openvpn.h	2013-05-31 21:00:25.000000000 +0900
++++ openvpn-2.3.2/src/openvpn/openvpn.h	2016-04-14 13:17:17.052180402 +0900
+@@ -543,6 +543,9 @@
+ 
+   struct context_persist persist;
+                                 /**< Persistent %context. */
++#ifdef ENABLE_FLOATING_TLS
++  uint64_t floating_tls_prefix;
++#endif
+   struct context_0 *c0;         /**< Level 0 %context. */
+   struct context_1 c1;          /**< Level 1 %context. */
+   struct context_2 c2;          /**< Level 2 %context. */
+Index: openvpn-2.3.2/src/openvpn/options.c
+===================================================================
+--- openvpn-2.3.2.orig/src/openvpn/options.c	2016-04-14 13:13:53.000000000 +0900
++++ openvpn-2.3.2/src/openvpn/options.c	2016-04-14 13:17:35.236179873 +0900
+@@ -164,6 +164,7 @@
+   "                  Set n=\"infinite\" to retry indefinitely.\n"
+   "--float         : Allow remote to change its IP address/port, such as through\n"
+   "                  DHCP (this is the default if --remote is not used).\n"
++  "--floating-tls  : Allows floating in multi-tls sessions.\n"
+   "--ipchange cmd  : Run command cmd on remote ip address initial\n"
+   "                  setting or change -- execute as: cmd ip-address port#\n"
+   "--port port     : TCP/UDP port # for both local and remote.\n"
+@@ -1624,6 +1625,10 @@
+   SHOW_BOOL (tls_exit);
+ 
+   SHOW_STR (tls_auth_file);
++
++#ifdef ENABLE_FLOATING_TLS
++  SHOW_BOOL (floating_tls);
++#endif
+ #endif
+ #endif
+ 
+@@ -2313,6 +2318,9 @@
+       MUST_BE_UNDEF (transition_window);
+       MUST_BE_UNDEF (tls_auth_file);
+       MUST_BE_UNDEF (single_session);
++#ifdef ENABLE_FLOATING_TLS
++      MUST_BE_UNDEF (floating_tls);
++#endif
+ #ifdef ENABLE_PUSH_PEER_INFO
+       MUST_BE_UNDEF (push_peer_info);
+ #endif
+@@ -3001,6 +3009,11 @@
+ #endif
+       }
+ 
++#ifdef ENABLE_FLOATING_TLS
++    if (o->floating_tls)
++            buf_printf (&out, ",floating-tls");
++#endif
++
+ #ifdef ENABLE_SSL
+   /*
+    * SSL Options
+@@ -6492,6 +6505,13 @@
+       VERIFY_PERMISSION (OPT_P_GENERAL);
+       options->single_session = true;
+     }
++#ifdef ENABLE_FLOATING_TLS
++  else if (streq (p[0], "floating-tls"))
++  {
++          VERIFY_PERMISSION (OPT_P_GENERAL);
++          options->floating_tls = true;
++  }
++#endif
+ #ifdef ENABLE_PUSH_PEER_INFO
+   else if (streq (p[0], "push-peer-info"))
+     {
+Index: openvpn-2.3.2/src/openvpn/options.h
+===================================================================
+--- openvpn-2.3.2.orig/src/openvpn/options.h	2013-05-31 21:00:25.000000000 +0900
++++ openvpn-2.3.2/src/openvpn/options.h	2016-04-14 13:17:44.612179601 +0900
+@@ -202,6 +202,10 @@
+   bool genkey;
+ #endif
+ 
++#ifdef ENABLE_FLOATING_TLS
++  bool floating_tls;
++#endif
++
+   /* Networking parms */
+   struct connection_entry ce;
+   char *remote_ip_hint;
+Index: openvpn-2.3.2/src/openvpn/ssl.c
+===================================================================
+--- openvpn-2.3.2.orig/src/openvpn/ssl.c	2016-04-14 13:13:53.000000000 +0900
++++ openvpn-2.3.2/src/openvpn/ssl.c	2016-04-14 13:18:00.500179139 +0900
+@@ -2780,7 +2780,11 @@
+ #ifdef ENABLE_DEF_AUTH
+ 		  && !ks->auth_deferred
+ #endif
+-		  && link_socket_actual_match (from, &ks->remote_addr))
++            && (
++#ifdef ENABLE_FLOATING_TLS
++                    multi->opt.floating_tls ||
++#endif
++                    link_socket_actual_match (from, &ks->remote_addr)))
+ 		{
+ 		  /* return appropriate data channel decrypt key in opt */
+ 		  opt->key_ctx_bi = &ks->key;
+@@ -3023,7 +3027,12 @@
+ 	      /*
+ 	       * Verify remote IP address
+ 	       */
+-	      if (!new_link && !link_socket_actual_match (&ks->remote_addr, from))
++//	      if (!new_link && !link_socket_actual_match (&ks->remote_addr, from))
++        if (!new_link
++#ifdef ENABLE_FLOATING_TLS
++            && !multi->opt.floating_tls
++#endif
++            && !link_socket_actual_match (&ks->remote_addr, from))
+ 		{
+ 		  msg (D_TLS_ERRORS, "TLS Error: Received control packet from unexpected IP addr: %s",
+ 		      print_link_socket_actual (from, &gc));
+@@ -3088,7 +3097,12 @@
+ 		ks->remote_addr = *from;
+ 		++multi->n_sessions;
+ 	      }
+-	    else if (!link_socket_actual_match (&ks->remote_addr, from))
++//	    else if (!link_socket_actual_match (&ks->remote_addr, from))
++      else if (
++#ifdef ENABLE_FLOATING_TLS
++              !multi->opt.floating_tls &&
++#endif
++              !link_socket_actual_match (&ks->remote_addr, from))
+ 	      {
+ 		msg (D_TLS_ERRORS,
+ 		     "TLS Error: Existing session control channel packet from unknown IP address: %s",
+Index: openvpn-2.3.2/src/openvpn/ssl.h
+===================================================================
+--- openvpn-2.3.2.orig/src/openvpn/ssl.h	2013-05-31 21:00:07.000000000 +0900
++++ openvpn-2.3.2/src/openvpn/ssl.h	2016-04-14 13:18:09.124178888 +0900
+@@ -70,6 +70,13 @@
+ #define P_FIRST_OPCODE                 1
+ #define P_LAST_OPCODE                  8
+ 
++/* Extra opcodes for floating TLS */
++#ifdef ENABLE_FLOATING_TLS
++#define FLOATING_TLS_OPCODE_MASK 0xF0
++#define FLOATING_TLS_OPCODE 0xF0
++#define FLOATING_TLS_LENGTH_MASK 0x0F
++#endif
++
+ /* Should we aggregate TLS
+  * acknowledgements, and tack them onto
+  * control packets? */
+Index: openvpn-2.3.2/src/openvpn/ssl_common.h
+===================================================================
+--- openvpn-2.3.2.orig/src/openvpn/ssl_common.h	2013-05-31 21:00:25.000000000 +0900
++++ openvpn-2.3.2/src/openvpn/ssl_common.h	2016-04-14 13:18:24.004178455 +0900
+@@ -229,6 +229,9 @@
+   int key_method;
+   bool replay;
+   bool single_session;
++#ifdef ENABLE_FLOATING_TLS
++  bool floating_tls;
++#endif
+ #ifdef ENABLE_OCC
+   bool disable_occ;
+ #endif

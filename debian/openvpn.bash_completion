@@ -1,0 +1,23 @@
+# bash completion for wg-openvpn init.d script
+# Written by Alberto Gonzalez Iniesta <agi@inittab.org>
+
+_wg_openvpn()
+{
+
+  local cur 
+
+  COMPREPLY=()
+  cur=${COMP_WORDS[COMP_CWORD]}
+
+  if [ $COMP_CWORD -eq 1 ] ; then
+    COMPREPLY=( $( compgen -W '$( /etc/init.d/wg-openvpn 2>&1 \
+              | cut -d"{" -f2 | tr -d "}" | tr "|" " " )' -- $cur ) )
+  else
+    COMPREPLY=( $( compgen -W '$( command ls /etc/wg-openvpn/*.conf 2>/dev/null \
+              | sed -e 's%/etc/wg-openvpn/%%' -e 's/\.conf//' )' -- $cur ) )
+  fi
+
+}
+
+
+complete -F _wg_openvpn /etc/init.d/wg-openvpn

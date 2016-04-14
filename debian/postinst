@@ -1,0 +1,49 @@
+#!/bin/sh
+# Copyright 2001 Alberto Gonzalez Iniesta <agi@agi.as>
+# Licensed under the GNU General Public License, version 2.  See the file
+# /usr/share/common-licenses/GPL or <http://www.gnu.org/copyleft/gpl.txt>.
+#
+set -e
+test $DEBIAN_SCRIPT_DEBUG && set -v -x
+
+# use debconf
+. /usr/share/debconf/confmodule
+
+case "$1" in
+  configure)
+    db_get wg-openvpn/create_tun || RET="false"
+    if [ "$RET" = "true" ]; then
+      [ -e /dev/net ] || mkdir -m 755 /dev/net
+      [ -d /dev/net -a ! -e /dev/net/tun ] && mknod /dev/net/tun c 10 200
+    fi
+    # move /run/wg-openvpn.foo.pid to (subdir) /run/wg-openvpn/foo.pid
+    if [ -n "$2" ] && dpkg --compare-versions "$2" lt 2.3.2-6 ; then
+      mkdir -p /run/wg-openvpn
+      for f in $(ls /var/run/wg-openvpn.*.pid /var/run/wg-openvpn.*.status 2>/dev/null); do
+        mv "$f" "/run/wg-openvpn/$(basename $f | sed 's/^wg-openvpn\.//')"
+      done
+    fi
+    for f in /run/sendsigs.omit.d/wg-openvpn.*.pid; do
+      [ -e "$f" ] && continue
+      b="$(basename $f|sed 's/wg-openvpn\.//')"
+      # make sure is a vpn name, not *.pid (#730679)
+      echo "$b" | grep -q '\*' && continue
+      ln -sf "/run/wg-openvpn/$b" "/run/sendsigs.omit.d/wg-openvpn.$b"
+    done
+  ;;
+esac
+
+if [ -x "/etc/init.d/wg-openvpn" ]; then
+	if [ -x /usr/sbin/invoke-rc.d ]; then
+	   invoke-rc.d wg-openvpn cond-restart || invoke-rc.d wg-openvpn restart
+	else
+	   /etc/init.d/wg-openvpn cond-restart || /etc/init.d/wg-openvpn restart
+	fi
+fi
+
+db_stop
+
+#DEBHELPER#
+
+exit 0
+# vim:set ai et sts=2 sw=2 tw=0:

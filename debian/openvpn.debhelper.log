@@ -1,0 +1,8 @@
+override_dh_auto_configure dh_auto_configure
+dh_auto_configure
+override_dh_auto_build dh_auto_build
+dh_auto_build
+dh_auto_test
+dh_prep
+dh_installdirs
+override_dh_auto_install dh_auto_install
