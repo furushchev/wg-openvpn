@@ -1,18 +1,18 @@
 # wg-openvpn
 
-## install prerequisities
+### install prerequisities
 
 ```bash
 sudo apt-get build-dep openvpn
 ```
 
-## build deb from source
+### build deb from source
 
 ```bash
 dpkg-buildpackage -uc -b
 ```
 
-## build deb from deb source
+### build deb from deb source
 
 ```bash
 dpkg-source -x openvpn-XXX.dsc
@@ -20,7 +20,13 @@ cd openvpn-XXX
 dpkg-buildpackage -uc -b
 ```
 
-## patch
+### clean build space
+
+```bash
+./debian/rules clean
+```
+
+### create patch
 
 ```bash
 # init patch file

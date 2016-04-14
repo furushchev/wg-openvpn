@@ -1,4 +1,4 @@
-openvpn (2.3.2-7ubuntu3.99) UNRELEASED; urgency=medium
+wg-openvpn (2.3.2-7ubuntu3.99) UNRELEASED; urgency=medium
 
   * Patch wg-openvpn
     - support float-tls
